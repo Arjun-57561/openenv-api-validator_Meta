@@ -1,13 +1,9 @@
-"""
-Baseline agent: calls the deployed Space (or local server) and uses the OpenAI-compatible
-client for all LLM generations. Set SPACE_URL to your Hugging Face Space URL when validating remotely.
-"""
-
 from __future__ import annotations
 
 import json
 import os
 import sys
+from typing import Optional
 
 import requests
 from openai import OpenAI
@@ -17,7 +13,7 @@ def _llm() -> OpenAI:
     base = os.getenv("API_BASE_URL", "").strip()
     key = os.getenv("HF_TOKEN", "").strip()
     if not base or not key:
-        print("Set API_BASE_URL and HF_TOKEN (Groq key) for the baseline agent.", file=sys.stderr)
+        print("Set API_BASE_URL and HF_TOKEN.", file=sys.stderr)
         sys.exit(1)
     return OpenAI(base_url=base, api_key=key)
 
@@ -28,6 +24,21 @@ def _model() -> str:
 
 def _space_url() -> str:
     return os.getenv("SPACE_URL", "http://127.0.0.1:7860").rstrip("/")
+
+
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
+
+
+def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
 
 def _agent_action(observation: str) -> str:
@@ -54,31 +65,48 @@ def _agent_action(observation: str) -> str:
 
 def run_episode(difficulty: str) -> tuple[str, float, int]:
     base = _space_url()
+    env_name = "api-response-validator"
+    model_name = _model()
+
     r = requests.post(f"{base}/reset", json={"difficulty": difficulty}, timeout=120)
     r.raise_for_status()
     st = r.json()
     task_name = st["task_name"]
     obs = st["current_input"]
 
-    print(f'[START] {json.dumps({"task": task_name, "difficulty": st["difficulty"]})}', flush=True)
+    log_start(task=task_name, env=env_name, model=model_name)
 
-    action_text = _agent_action(obs)
-    body = {"content": action_text}
-    sr = requests.post(f"{base}/step", json=body, timeout=120)
-    sr.raise_for_status()
-    out = sr.json()
-    reward = float(out["reward"])
-    done = bool(out["done"])
-    step_idx = int(out["state"]["step_count"])
+    all_rewards = []
+    steps = 0
+    done = False
+    error = None
 
-    print(
-        f'[STEP] {json.dumps({"step": step_idx, "action": action_text, "reward": reward, "done": done})}',
-        flush=True,
-    )
+    while not done and steps < 8:
+        try:
+            action_text = _agent_action(obs)
+        except Exception as e:
+            error = str(e)
+            action_text = ""
 
-    total = reward
-    steps = 1
-    print(f'[END] {json.dumps({"task": task_name, "total_reward": total, "steps": steps})}', flush=True)
+        body = {"content": action_text}
+        sr = requests.post(f"{base}/step", json=body, timeout=120)
+        sr.raise_for_status()
+        out = sr.json()
+
+        reward = float(out["reward"])
+        done = bool(out["done"])
+        steps += 1
+        obs = out.get("state", {}).get("current_input", obs)
+
+        log_step(step=steps, action=action_text, reward=reward, done=done, error=error)
+        all_rewards.append(reward)
+        error = None
+
+    total = sum(all_rewards)
+    score = total / max(steps, 1)
+    success = score >= 0.1
+
+    log_end(success=success, steps=steps, score=score, rewards=all_rewards)
     return task_name, total, steps
 
 
