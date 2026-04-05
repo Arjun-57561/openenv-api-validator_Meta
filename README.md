@@ -1,3 +1,20 @@
+---
+title: API Response Validator
+emoji: ⚙️
+colorFrom: blue
+colorTo: green
+sdk: docker
+sdk_version: "1.0"
+python_version: "3.11"
+app_file: app.py
+pinned: false
+---
+
+# API Response Validator
+
+OpenEnv submission: environment that validates JSON/API responses against a spec.
+
+
 # API Response Validator (OpenEnv)
 
 OpenEnv-compatible environment where a text agent reviews synthetic HTTP API responses for contract fit, schema risk, and documentation consistency. Rewards are in **[0.0, 1.0]** with partial credit on every difficulty tier.
