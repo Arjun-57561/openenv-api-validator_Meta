@@ -140,7 +140,7 @@ def grade_hard(agent_text: str, ground_truth: Dict[str, Any]) -> float:
     text = agent_text.lower()
     ref_toks = set(re.findall(r"[a-z]{4,}", reference.lower()))
     if not ref_toks:
-        return 0.45
+        return _safe_score(0.45)
 
     overlap = sum(1 for t in ref_toks if t in text)
     base = 0.25 + 0.55 * min(1.0, overlap / max(6, len(ref_toks) * 0.3))

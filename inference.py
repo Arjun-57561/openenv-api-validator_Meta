@@ -13,6 +13,20 @@ import requests
 from openai import OpenAI
 
 
+def _safe_score(x: float) -> float:
+    """Force emitted rewards to be strictly inside (0, 1)."""
+    try:
+        x = float(x)
+    except Exception:
+        x = 0.5
+
+    if x <= 0.0:
+        return 0.01
+    if x >= 1.0:
+        return 0.99
+    return round(x, 6)
+
+
 def _llm() -> OpenAI:
     base = os.getenv("API_BASE_URL", "").strip()
     key = os.getenv("HF_TOKEN", "").strip()
@@ -90,16 +104,17 @@ def run_episode(difficulty: str) -> tuple[str, float, int]:
         r = _post_reset(base, difficulty)
         if r.status_code != 200:
             task_name = fallback_task_name
+            fallback_reward = _safe_score(0.01)
             print(f'[START] {json.dumps({"task": task_name, "difficulty": difficulty})}', flush=True)
             print(
-                f'[STEP] {json.dumps({"step": 0, "action": "", "reward": 0.0, "done": True})}',
+                f'[STEP] {json.dumps({"step": 0, "action": "", "reward": fallback_reward, "done": True})}',
                 flush=True,
             )
             print(
-                f'[END] {json.dumps({"task": task_name, "total_reward": 0.0, "steps": 1})}',
+                f'[END] {json.dumps({"task": task_name, "total_reward": fallback_reward, "steps": 1})}',
                 flush=True,
             )
-            return task_name, 0.0, 1
+            return task_name, fallback_reward, 1
 
         st = _safe_json(r)
         task_name = st.get("task_name", fallback_task_name)
@@ -123,17 +138,17 @@ def run_episode(difficulty: str) -> tuple[str, float, int]:
             sr = requests.post(f"{base}/step", json=body, timeout=120)
             if sr.status_code != 200:
                 out = {}
-                reward = 0.0
+                reward = _safe_score(0.01)
                 done = True
                 step_idx = 1
             else:
                 out = _safe_json(sr)
-                reward = float(out.get("reward", 0.0))
+                reward = _safe_score(out.get("reward", 0.01))
                 done = bool(out.get("done", True))
                 state = out.get("state", {})
                 step_idx = int(state.get("step_count", 1))
         except requests.RequestException:
-            reward = 0.0
+            reward = _safe_score(0.01)
             done = True
             step_idx = 1
 
@@ -149,16 +164,17 @@ def run_episode(difficulty: str) -> tuple[str, float, int]:
 
     except Exception:
         task_name = fallback_task_name
+        fallback_reward = _safe_score(0.01)
         print(f'[START] {json.dumps({"task": task_name, "difficulty": difficulty})}', flush=True)
         print(
-            f'[STEP] {json.dumps({"step": 0, "action": "", "reward": 0.0, "done": True})}',
+            f'[STEP] {json.dumps({"step": 0, "action": "", "reward": fallback_reward, "done": True})}',
             flush=True,
         )
         print(
-            f'[END] {json.dumps({"task": task_name, "total_reward": 0.0, "steps": 1})}',
+            f'[END] {json.dumps({"task": task_name, "total_reward": fallback_reward, "steps": 1})}',
             flush=True,
         )
-        return task_name, 0.0, 1
+        return task_name, fallback_reward, 1
 
 
 def main() -> None:
