@@ -7,18 +7,18 @@ from typing import Any, Dict
 from openai import OpenAI
 
 
-def safe_score(x: float) -> float:
-    """Force every score to be strictly inside (0, 1)."""
+def clamp_score(x: float) -> float:
+    """Force every score to stay strictly inside the safe reward band."""
     try:
-        x = float(x)
+        value = float(x)
     except Exception:
-        x = 0.5
+        value = 0.5
 
-    if x <= 0.0:
-        return 0.01
-    if x >= 1.0:
-        return 0.99
-    return round(x, 4)
+    return max(0.001, min(0.95, round(value, 4)))
+
+
+def safe_score(x: float) -> float:
+    return clamp_score(x)
 
 
 def client() -> OpenAI:
@@ -35,19 +35,19 @@ def model_name() -> str:
     return os.getenv("MODELNAME", "llama-3.3-70b-versatile").strip()
 
 
-def gradeeasy(agent_text: str, groundtruth: Dict[str, Any]) -> float:
+def grade_easy(agent_text: str, groundtruth: Dict[str, Any]) -> float:
     """
     Rule-based: expected HTTP status, required top-level JSON fields, content-type mention.
     Partial credit from independent checks -> varied scores strictly inside (0, 1).
     """
     text = agent_text.lower()
-    weights: list[float] = []
+    score = 0.0
 
     expstatus = int(groundtruth.get("expected_status", 0) or groundtruth.get("expectedstatus", 0))
-    weights.append(0.2 if expstatus and str(expstatus) in agent_text else 0.0)
+    score += 0.18 if expstatus and str(expstatus) in agent_text else 0.0
 
-    weights.append(
-        0.2
+    score += (
+        0.18
         if (
             "application/json" in text
             or "content-type" in text
@@ -60,61 +60,56 @@ def gradeeasy(agent_text: str, groundtruth: Dict[str, Any]) -> float:
     req = groundtruth.get("required_fields", groundtruth.get("requiredfields", []))
     if req:
         hits = sum(1 for f in req if f.lower() in text)
-        weights.append(0.25 * (hits / len(req)))
-    else:
-        weights.append(0.0)
+        score += 0.22 * (hits / len(req))
 
     must_note_ok = groundtruth.get("must_note_ok", groundtruth.get("mustnoteok", False))
     if must_note_ok:
-        weights.append(
-            0.2
+        score += (
+            0.18
             if ("valid" in text or "acceptable" in text or "correct" in text or "ok" in text)
             else 0.0
         )
-    else:
-        weights.append(0.0)
 
     false_error = (
         ("500" in agent_text or "404" in agent_text or " 400 " in agent_text)
         and expstatus == 200
     )
-    weights.append(0.15 if not false_error else 0.0)
+    score += 0.14 if not false_error else 0.0
 
-    score = sum(weights)
-    return safe_score(score)
+    return clamp_score(score)
 
 
-def grademedium(agent_text: str, groundtruth: Dict[str, Any]) -> float:
+def grade_medium(agent_text: str, groundtruth: Dict[str, Any]) -> float:
     """
     Keyword + light structure: penalties for missing risk flags, bonus for schema wording.
     """
     text = agent_text.lower()
-    score = 0.35
+    score = 0.3
 
     keywords = groundtruth.get("expected_keywords", groundtruth.get("expectedkeywords", []))
     if keywords:
         hits = sum(1 for k in keywords if k.lower() in text)
-        score += 0.45 * (hits / len(keywords))
+        score += 0.4 * (hits / len(keywords))
 
     must_mention_nested = groundtruth.get(
         "must_mention_nested", groundtruth.get("mustmentionnested", False)
     )
     if must_mention_nested and re.search(r"user\.address|nested|address\.zip|zip", text):
-        score += 0.12
+        score += 0.1
 
     must_mention_null = groundtruth.get(
         "must_mention_null", groundtruth.get("mustmentionnull", False)
     )
     if must_mention_null and ("null" in text or "missing" in text or "omit" in text):
-        score += 0.08
+        score += 0.07
 
     if len(agent_text.strip()) < 40:
         score -= 0.15
 
-    return safe_score(score)
+    return clamp_score(score)
 
 
-def gradehard(agent_text: str, groundtruth: Dict[str, Any]) -> float:
+def grade_hard(agent_text: str, groundtruth: Dict[str, Any]) -> float:
     """
     LLM-as-judge with strict JSON output; falls back to blended heuristic if the API errors.
     """
@@ -151,14 +146,14 @@ def gradehard(agent_text: str, groundtruth: Dict[str, Any]) -> float:
         if m:
             data = json.loads(m.group())
             s = float(data.get("score", 0.5))
-            return safe_score(s)
+            return clamp_score(s)
     except Exception:
         pass
 
     text = agent_text.lower()
     reftoks = set(re.findall(r"[a-z]{4,}", reference.lower()))
     if not reftoks:
-        return safe_score(0.45)
+        return clamp_score(0.45)
 
     overlap = sum(1 for t in reftoks if t in text)
     base = 0.25 + 0.55 * min(1.0, overlap / max(6, len(reftoks) * 0.3))
@@ -172,4 +167,16 @@ def gradehard(agent_text: str, groundtruth: Dict[str, Any]) -> float:
     if "retryafter" in text or "retry_after" in text:
         base += 0.04
 
-    return safe_score(base)
+    return clamp_score(base)
+
+
+def gradeeasy(agent_text: str, groundtruth: Dict[str, Any]) -> float:
+    return grade_easy(agent_text, groundtruth)
+
+
+def grademedium(agent_text: str, groundtruth: Dict[str, Any]) -> float:
+    return grade_medium(agent_text, groundtruth)
+
+
+def gradehard(agent_text: str, groundtruth: Dict[str, Any]) -> float:
+    return grade_hard(agent_text, groundtruth)

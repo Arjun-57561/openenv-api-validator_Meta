@@ -1,25 +1,21 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Tuple
-from app.graders import gradeeasy, gradehard, grademedium
 
+from app.graders import grade_easy, grade_hard, grade_medium
 from app.models import Action, State, StepResult
 
 Difficulty = Literal["easy", "medium", "hard"]
 
 
 def _safe_score(x: float) -> float:
-    """Force every reward to be strictly inside (0, 1)."""
+    """Force every reward to stay strictly inside the safe reward band."""
     try:
-        x = float(x)
+        value = float(x)
     except Exception:
-        x = 0.5
+        value = 0.5
 
-    if x <= 0.0:
-        return 0.01
-    if x >= 1.0:
-        return 0.99
-    return round(x, 6)
+    return max(0.001, min(0.95, round(value, 6)))
 
 
 def _scenarios() -> List[Dict[str, Any]]:
@@ -118,7 +114,7 @@ class APIResponseValidatorEnv:
             difficulty=spec["difficulty"],
             step_count=0,
             current_input=spec["prompt"],
-            last_reward=0.01,
+            last_reward=0.001,
             task_name=spec["name"],
             done=False,
         )

@@ -21,6 +21,7 @@ def _require_config() -> None:
 @app.on_event("startup")
 def _startup() -> None:
     _require_config()
+    _env.reset("easy")
 
 
 @app.get("/health")
