@@ -6,16 +6,17 @@ from app.graders import grade_easy, grade_hard, grade_medium
 from app.models import Action, State, StepResult
 
 Difficulty = Literal["easy", "medium", "hard"]
+MIN_REWARD = 0.001
+MAX_REWARD = 0.95
 
 
 def _safe_score(x: float) -> float:
-    """Force every reward to stay strictly inside the safe reward band."""
+    """Force every reward to stay strictly inside (0.001, 0.95)."""
     try:
         value = float(x)
     except Exception:
         value = 0.5
-
-    return max(0.001, min(0.95, round(value, 6)))
+    return max(MIN_REWARD, min(MAX_REWARD, round(value, 6)))
 
 
 def _scenarios() -> List[Dict[str, Any]]:
@@ -80,7 +81,7 @@ def _scenarios() -> List[Dict[str, Any]]:
                 ),
                 "reference_verdict": (
                     "The payload matches the documented shape. request_id should not be "
-                    "logged in client telemetry per docs—teams should hash or drop it. "
+                    "logged in client telemetry per docs; teams should hash or drop it. "
                     "retry_after is not mentioned in the contract excerpt, so it is an "
                     "undocumented extension that could surprise integrators."
                 ),
@@ -90,7 +91,7 @@ def _scenarios() -> List[Dict[str, Any]]:
 
 
 class APIResponseValidatorEnv:
-    """Single-step episodes: reset loads a scenario; step grades the agent's verdict."""
+    """Single-step episodes: reset loads one scenario, step grades one action."""
 
     def __init__(self) -> None:
         self._scenarios = {s["difficulty"]: s for s in _scenarios()}
@@ -105,7 +106,7 @@ class APIResponseValidatorEnv:
                 difficulty = "easy"
             else:
                 idx = order.index(self._last_difficulty_request)
-                difficulty = order[(idx + 1) % 3]
+                difficulty = order[(idx + 1) % len(order)]
 
         self._last_difficulty_request = difficulty
         spec = self._scenarios[difficulty]
@@ -114,7 +115,7 @@ class APIResponseValidatorEnv:
             difficulty=spec["difficulty"],
             step_count=0,
             current_input=spec["prompt"],
-            last_reward=0.001,
+            last_reward=MIN_REWARD,
             task_name=spec["name"],
             done=False,
         )
@@ -130,18 +131,17 @@ class APIResponseValidatorEnv:
             self.reset("easy")
         assert self._state is not None and self._active is not None
 
-        diff = self._active["difficulty"]
-        gt = self._active["ground_truth"]
+        difficulty = self._active["difficulty"]
+        ground_truth = self._active["ground_truth"]
 
-        if diff == "easy":
-            raw_reward = grade_easy(action.content, gt)
-        elif diff == "medium":
-            raw_reward = grade_medium(action.content, gt)
+        if difficulty == "easy":
+            raw_reward = grade_easy(action.content, ground_truth)
+        elif difficulty == "medium":
+            raw_reward = grade_medium(action.content, ground_truth)
         else:
-            raw_reward = grade_hard(action.content, gt)
+            raw_reward = grade_hard(action.content, ground_truth)
 
         reward = _safe_score(raw_reward)
-
         new_state = self._state.model_copy(
             update={
                 "step_count": self._state.step_count + 1,

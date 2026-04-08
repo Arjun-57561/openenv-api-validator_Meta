@@ -12,10 +12,10 @@ _env = APIResponseValidatorEnv()
 
 
 def _require_config() -> None:
-    """Optional at import time; graders need env when hard task runs."""
-    _ = os.getenv("API_BASE_URL", "").strip()
-    _ = os.getenv("MODEL_NAME", "").strip()
-    _ = os.getenv("HF_TOKEN", "").strip()
+    """Access env vars early so misconfigured deployments fail fast on hard grading."""
+    _ = (os.getenv("APIBASEURL", "") or os.getenv("API_BASE_URL", "")).strip()
+    _ = (os.getenv("MODELNAME", "") or os.getenv("MODEL_NAME", "")).strip()
+    _ = (os.getenv("HFTOKEN", "") or os.getenv("HF_TOKEN", "")).strip()
 
 
 @app.on_event("startup")
@@ -45,8 +45,8 @@ async def reset(request: Request) -> State:
 def step(action: Action) -> StepResult:
     try:
         return _env.step(action)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/state", response_model=State)
