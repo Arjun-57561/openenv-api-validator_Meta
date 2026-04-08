@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Tuple
+from app.graders import gradeeasy, gradehard, grademedium
 
-from app.graders import grade_easy, grade_hard, grade_medium
 from app.models import Action, State, StepResult
 
 Difficulty = Literal["easy", "medium", "hard"]
