@@ -8,6 +8,19 @@ from app.models import Action, State, StepResult
 Difficulty = Literal["easy", "medium", "hard"]
 
 
+def _safe_score(x: float) -> float:
+    """Clamp reward to strictly (0, 1) — never 0.0 or 1.0."""
+    try:
+        x = float(x)
+    except Exception:
+        x = 0.5
+    if x <= 0.0:
+        return 0.01
+    if x >= 1.0:
+        return 0.99
+    return round(x, 6)
+
+
 def _scenarios() -> List[Dict[str, Any]]:
     return [
         {
@@ -121,12 +134,15 @@ class APIResponseValidatorEnv:
 
         diff = self._active["difficulty"]
         gt = self._active["ground_truth"]
+
         if diff == "easy":
-            reward = grade_easy(action.content, gt)
+            raw = grade_easy(action.content, gt)
         elif diff == "medium":
-            reward = grade_medium(action.content, gt)
+            raw = grade_medium(action.content, gt)
         else:
-            reward = grade_hard(action.content, gt)
+            raw = grade_hard(action.content, gt)
+
+        reward = _safe_score(raw)   # ← clamp to strictly (0, 1)
 
         new_state = self._state.model_copy(
             update={
