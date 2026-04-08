@@ -15,9 +15,9 @@ def _safe_score(x: float) -> float:
     except Exception:
         x = 0.5
     if x <= 0.0:
-        return 0.01
+        return 0.001
     if x >= 1.0:
-        return 0.99
+        return 0.999
     return round(x, 6)
 
 
@@ -116,7 +116,7 @@ class APIResponseValidatorEnv:
             difficulty=spec["difficulty"],
             step_count=0,
             current_input=spec["prompt"],
-            last_reward=0.0,
+            last_reward=0.001,   # ← FIXED: was 0.0, now strictly > 0
             task_name=spec["name"],
             done=False,
         )
@@ -142,7 +142,7 @@ class APIResponseValidatorEnv:
         else:
             raw = grade_hard(action.content, gt)
 
-        reward = _safe_score(raw)   # ← clamp to strictly (0, 1)
+        reward = _safe_score(raw)   # clamp to strictly (0, 1)
 
         new_state = self._state.model_copy(
             update={
