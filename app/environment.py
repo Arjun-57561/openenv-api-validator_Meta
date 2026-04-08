@@ -4,7 +4,7 @@ APIResponseValidatorEnv – OpenEnv-compatible environment.
 import random
 from typing import Optional
 from app.models import Action, State, StepResult, clamp_reward
-from app.grader import grade_easy, grade_medium, grade_hard
+from app.graders import grade_easy, grade_medium, grade_hard
 
 SCENARIOS = {
     "easy": [
@@ -57,7 +57,7 @@ SCENARIOS = {
             "ground_truth": "VALID with caveats – amount stored as integer cents (15000 = $150.00), correct. Status 'requires_action' indicates 3DS authentication needed. next_action URL present as required. Currency lowercase 'usd' is Stripe convention, acceptable.",
         },
         {
-            "input": "Endpoint: GET /api/v1/reports/summary?from=2024-01-01&to=2024-12-31\nResponse 200: {'period': {'from': '2024-01-01', 'to': '2024-12-31'}, 'metrics': {'revenue': 1250000, 'orders': 4820, 'avg_order': 259.33, 'refund_rate': 0.023}, 'breakdown': [{'month': 'Jan', 'revenue': 95000}, '... 11 more items ...']}",
+            "input": "Endpoint: GET /api/v1/reports/summary?from=2024-01-01&to=2024-12-31\nResponse 200: {'period': {'from': '2024-01-01', 'to': '2024-12-31'}, 'metrics': {'revenue': 1250000, 'orders': 4820, 'avg_order': 259.33, 'refund_rate': 0.023}, 'breakdown': [{'month': 'Jan', 'revenue': 95000}]}",
             "ground_truth": "VALID – well-structured analytics response. Period matches query params. avg_order = revenue/orders = 259.33 correct. refund_rate 0.023 is ratio (2.3%), within normal range.",
         },
         {
@@ -115,7 +115,7 @@ class APIResponseValidatorEnv:
         else:
             raw_reward = grade_hard(action.content, ground_truth)
 
-        reward = clamp_reward(raw_reward)  # final safety clamp
+        reward = clamp_reward(raw_reward)
 
         self._state.step_count += 1
         self._state.done = True
