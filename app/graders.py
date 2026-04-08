@@ -7,7 +7,7 @@ from typing import Any, Dict
 from openai import OpenAI
 
 
-def _safe_score(x: float) -> float:
+def safe_score(x: float) -> float:
     """Force every score to be strictly inside (0, 1)."""
     try:
         x = float(x)
@@ -21,19 +21,21 @@ def _safe_score(x: float) -> float:
     return round(x, 4)
 
 
-def _client() -> OpenAI:
+def client() -> OpenAI:
     import os
-    base = os.getenv("API_BASE_URL", "").strip()
-    key = os.getenv("HF_TOKEN", "").strip()
+
+    base = os.getenv("APIBASEURL", "").strip()
+    key = os.getenv("HFTOKEN", "").strip()
     return OpenAI(base_url=base, api_key=key or "dummy")
 
 
-def _model_name() -> str:
+def model_name() -> str:
     import os
-    return os.getenv("MODEL_NAME", "llama-3.3-70b-versatile").strip()
+
+    return os.getenv("MODELNAME", "llama-3.3-70b-versatile").strip()
 
 
-def grade_easy(agent_text: str, ground_truth: Dict[str, Any]) -> float:
+def gradeeasy(agent_text: str, groundtruth: Dict[str, Any]) -> float:
     """
     Rule-based: expected HTTP status, required top-level JSON fields, content-type mention.
     Partial credit from independent checks -> varied scores strictly inside (0, 1).
@@ -41,86 +43,102 @@ def grade_easy(agent_text: str, ground_truth: Dict[str, Any]) -> float:
     text = agent_text.lower()
     weights: list[float] = []
 
-    exp_status = int(ground_truth.get("expected_status", 0))
-    weights.append(0.2 if exp_status and str(exp_status) in agent_text else 0.0)
+    expstatus = int(groundtruth.get("expected_status", 0) or groundtruth.get("expectedstatus", 0))
+    weights.append(0.2 if expstatus and str(expstatus) in agent_text else 0.0)
+
     weights.append(
-        0.2 if ("application/json" in text or "content-type" in text or " json" in text) else 0.0
+        0.2
+        if (
+            "application/json" in text
+            or "content-type" in text
+            or " json" in text
+            or text.startswith("json")
+        )
+        else 0.0
     )
 
-    req = ground_truth.get("required_fields", [])
+    req = groundtruth.get("required_fields", groundtruth.get("requiredfields", []))
     if req:
         hits = sum(1 for f in req if f.lower() in text)
         weights.append(0.25 * (hits / len(req)))
     else:
         weights.append(0.0)
 
-    if ground_truth.get("must_note_ok"):
+    must_note_ok = groundtruth.get("must_note_ok", groundtruth.get("mustnoteok", False))
+    if must_note_ok:
         weights.append(
-            0.2 if ("valid" in text or "acceptable" in text or "correct" in text or "ok" in text) else 0.0
+            0.2
+            if ("valid" in text or "acceptable" in text or "correct" in text or "ok" in text)
+            else 0.0
         )
     else:
         weights.append(0.0)
 
     false_error = (
         ("500" in agent_text or "404" in agent_text or " 400 " in agent_text)
-        and exp_status == 200
+        and expstatus == 200
     )
     weights.append(0.15 if not false_error else 0.0)
 
     score = sum(weights)
-    return _safe_score(score)
+    return safe_score(score)
 
 
-def grade_medium(agent_text: str, ground_truth: Dict[str, Any]) -> float:
+def grademedium(agent_text: str, groundtruth: Dict[str, Any]) -> float:
     """
     Keyword + light structure: penalties for missing risk flags, bonus for schema wording.
     """
     text = agent_text.lower()
     score = 0.35
 
-    keywords = ground_truth.get("expected_keywords", [])
+    keywords = groundtruth.get("expected_keywords", groundtruth.get("expectedkeywords", []))
     if keywords:
         hits = sum(1 for k in keywords if k.lower() in text)
         score += 0.45 * (hits / len(keywords))
 
-    if ground_truth.get("must_mention_nested") and re.search(
-        r"user\.address|nested|address\.zip|zip", text
-    ):
+    must_mention_nested = groundtruth.get(
+        "must_mention_nested", groundtruth.get("mustmentionnested", False)
+    )
+    if must_mention_nested and re.search(r"user\.address|nested|address\.zip|zip", text):
         score += 0.12
 
-    if ground_truth.get("must_mention_null") and (
-        "null" in text or "missing" in text or "omit" in text
-    ):
+    must_mention_null = groundtruth.get(
+        "must_mention_null", groundtruth.get("mustmentionnull", False)
+    )
+    if must_mention_null and ("null" in text or "missing" in text or "omit" in text):
         score += 0.08
 
     if len(agent_text.strip()) < 40:
         score -= 0.15
 
-    return _safe_score(score)
+    return safe_score(score)
 
 
-def grade_hard(agent_text: str, ground_truth: Dict[str, Any]) -> float:
+def gradehard(agent_text: str, groundtruth: Dict[str, Any]) -> float:
     """
     LLM-as-judge with strict JSON output; falls back to blended heuristic if the API errors.
     """
-    rubric = ground_truth.get("rubric", "")
-    reference = ground_truth.get("reference_verdict", "")
+    rubric = groundtruth.get("rubric", "")
+    reference = groundtruth.get("reference_verdict", groundtruth.get("referenceverdict", ""))
+
     payload = {
         "rubric": rubric,
         "reference_verdict": reference,
         "agent_verdict": agent_text[:8000],
     }
+
     system = (
         "You grade how well the agent's API validation verdict matches the rubric and reference. "
         "Reply ONLY with compact JSON: "
-        "{\"score\": <float strictly between 0 and 1, never 0.0 or 1.0>, \"reason\": <short str>}. "
+        "{\"score\": <float strictly between 0 and 1, never 0.0 or 1.0>, "
+        "\"reason\": <short str>}. "
         "Use fine-grained scoring and never emit boundary values."
     )
     user = json.dumps(payload)
 
     try:
-        resp = _client().chat.completions.create(
-            model=_model_name(),
+        resp = client().chat.completions.create(
+            model=model_name(),
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -133,21 +151,25 @@ def grade_hard(agent_text: str, ground_truth: Dict[str, Any]) -> float:
         if m:
             data = json.loads(m.group())
             s = float(data.get("score", 0.5))
-            return _safe_score(s)
+            return safe_score(s)
     except Exception:
         pass
 
     text = agent_text.lower()
-    ref_toks = set(re.findall(r"[a-z]{4,}", reference.lower()))
-    if not ref_toks:
-        return _safe_score(0.45)
+    reftoks = set(re.findall(r"[a-z]{4,}", reference.lower()))
+    if not reftoks:
+        return safe_score(0.45)
 
-    overlap = sum(1 for t in ref_toks if t in text)
-    base = 0.25 + 0.55 * min(1.0, overlap / max(6, len(ref_toks) * 0.3))
+    overlap = sum(1 for t in reftoks if t in text)
+    base = 0.25 + 0.55 * min(1.0, overlap / max(6, len(reftoks) * 0.3))
 
-    if "pii" in text or "gdpr" in text:
+    if "pii" in text or "gdpr" in text or "privacy" in text:
         base += 0.08
     if "rate" in text and "limit" in text:
         base += 0.06
+    if "requestid" in text or "request_id" in text:
+        base += 0.04
+    if "retryafter" in text or "retry_after" in text:
+        base += 0.04
 
-    return _safe_score(base)
+    return safe_score(base)
