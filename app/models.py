@@ -3,7 +3,7 @@ from typing import Optional, Any, Dict
 
 
 def clamp_reward(v: float) -> float:
-    """Strictly clamp reward to open interval (0, 1)."""
+    """Strictly clamp reward to open interval (0, 1) — never 0.0 or 1.0."""
     return max(0.001, min(0.999, float(v)))
 
 
@@ -14,7 +14,7 @@ class Action(BaseModel):
 class State(BaseModel):
     difficulty: str = Field(..., description="easy | medium | hard")
     step_count: int = Field(0)
-    current_input: str = Field(..., description="API response scenario text shown to agent")
+    current_input: str = Field(..., description="API response scenario shown to agent")
     ground_truth: Optional[str] = Field(None, description="Expected validation answer")
     done: bool = Field(False)
     metadata: Dict[str, Any] = Field(default_factory=dict)

@@ -7,8 +7,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV API_BASE_URL="https://api-inference.huggingface.co/v1" \
-    MODEL_NAME="mistralai/Mistral-7B-Instruct-v0.3" \
+ENV API_BASE_URL="https://api.groq.com/openai/v1" \
+    MODEL_NAME="llama-3.1-8b-instant" \
+    GROQ_API_KEY="" \
     HF_TOKEN="" \
     PORT=7860
 
