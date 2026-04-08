@@ -9,15 +9,16 @@ Difficulty = Literal["easy", "medium", "hard"]
 
 
 def _safe_score(x: float) -> float:
-    """Clamp reward to strictly (0, 1) — never 0.0 or 1.0."""
+    """Force every reward to be strictly inside (0, 1)."""
     try:
         x = float(x)
     except Exception:
         x = 0.5
+
     if x <= 0.0:
-        return 0.001
+        return 0.01
     if x >= 1.0:
-        return 0.999
+        return 0.99
     return round(x, 6)
 
 
@@ -109,6 +110,7 @@ class APIResponseValidatorEnv:
             else:
                 idx = order.index(self._last_difficulty_request)
                 difficulty = order[(idx + 1) % 3]
+
         self._last_difficulty_request = difficulty
         spec = self._scenarios[difficulty]
         self._active = spec
@@ -116,7 +118,7 @@ class APIResponseValidatorEnv:
             difficulty=spec["difficulty"],
             step_count=0,
             current_input=spec["prompt"],
-            last_reward=0.001,   # ← FIXED: was 0.0, now strictly > 0
+            last_reward=0.01,
             task_name=spec["name"],
             done=False,
         )
@@ -136,13 +138,13 @@ class APIResponseValidatorEnv:
         gt = self._active["ground_truth"]
 
         if diff == "easy":
-            raw = grade_easy(action.content, gt)
+            raw_reward = grade_easy(action.content, gt)
         elif diff == "medium":
-            raw = grade_medium(action.content, gt)
+            raw_reward = grade_medium(action.content, gt)
         else:
-            raw = grade_hard(action.content, gt)
+            raw_reward = grade_hard(action.content, gt)
 
-        reward = _safe_score(raw)   # clamp to strictly (0, 1)
+        reward = _safe_score(raw_reward)
 
         new_state = self._state.model_copy(
             update={

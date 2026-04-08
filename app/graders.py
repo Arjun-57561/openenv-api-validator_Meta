@@ -1,4 +1,3 @@
-# C:\Users\Arjun\OneDrive\Desktop\Meta_RL\openenv-api-validator\app\graders.py
 from __future__ import annotations
 
 import json
@@ -6,6 +5,20 @@ import re
 from typing import Any, Dict
 
 from openai import OpenAI
+
+
+def _safe_score(x: float) -> float:
+    """Force every score to be strictly inside (0, 1)."""
+    try:
+        x = float(x)
+    except Exception:
+        x = 0.5
+
+    if x <= 0.0:
+        return 0.01
+    if x >= 1.0:
+        return 0.99
+    return round(x, 4)
 
 
 def _client() -> OpenAI:
@@ -23,7 +36,7 @@ def _model_name() -> str:
 def grade_easy(agent_text: str, ground_truth: Dict[str, Any]) -> float:
     """
     Rule-based: expected HTTP status, required top-level JSON fields, content-type mention.
-    Partial credit from independent checks -> varied scores in (0, 1) exclusive.
+    Partial credit from independent checks -> varied scores strictly inside (0, 1).
     """
     text = agent_text.lower()
     weights: list[float] = []
@@ -48,7 +61,6 @@ def grade_easy(agent_text: str, ground_truth: Dict[str, Any]) -> float:
     else:
         weights.append(0.0)
 
-    # Penalize falsely claiming a client/server error for a successful response
     false_error = (
         ("500" in agent_text or "404" in agent_text or " 400 " in agent_text)
         and exp_status == 200
@@ -56,9 +68,7 @@ def grade_easy(agent_text: str, ground_truth: Dict[str, Any]) -> float:
     weights.append(0.15 if not false_error else 0.0)
 
     score = sum(weights)
-
-    # Clamp to open interval (0.001, 0.999) — strictly between 0 and 1
-    return max(0.001, min(0.999, round(score, 4)))
+    return _safe_score(score)
 
 
 def grade_medium(agent_text: str, ground_truth: Dict[str, Any]) -> float:
@@ -86,8 +96,7 @@ def grade_medium(agent_text: str, ground_truth: Dict[str, Any]) -> float:
     if len(agent_text.strip()) < 40:
         score -= 0.15
 
-    # Clamp to open interval (0.001, 0.999) — strictly between 0 and 1
-    return max(0.001, min(0.999, round(score, 4)))
+    return _safe_score(score)
 
 
 def grade_hard(agent_text: str, ground_truth: Dict[str, Any]) -> float:
@@ -103,8 +112,9 @@ def grade_hard(agent_text: str, ground_truth: Dict[str, Any]) -> float:
     }
     system = (
         "You grade how well the agent's API validation verdict matches the rubric and reference. "
-        "Reply ONLY with compact JSON: {\"score\": <float strictly between 0 and 1, never 0.0 or 1.0>, \"reason\": <short str>} "
-        "Use fine-grained scoring; avoid 0.0 or 1.0 — scores must be strictly within (0, 1)."
+        "Reply ONLY with compact JSON: "
+        "{\"score\": <float strictly between 0 and 1, never 0.0 or 1.0>, \"reason\": <short str>}. "
+        "Use fine-grained scoring and never emit boundary values."
     )
     user = json.dumps(payload)
 
@@ -123,16 +133,14 @@ def grade_hard(agent_text: str, ground_truth: Dict[str, Any]) -> float:
         if m:
             data = json.loads(m.group())
             s = float(data.get("score", 0.5))
-            # Clamp to open interval (0.001, 0.999) — strictly between 0 and 1
-            return max(0.001, min(0.999, round(s, 4)))
+            return _safe_score(s)
     except Exception:
         pass
 
-    # Fallback: partial overlap with reference keywords (variable, not constant)
     text = agent_text.lower()
     ref_toks = set(re.findall(r"[a-z]{4,}", reference.lower()))
     if not ref_toks:
-        return 0.45  # safe: not 0.0 or 1.0
+        return 0.45
 
     overlap = sum(1 for t in ref_toks if t in text)
     base = 0.25 + 0.55 * min(1.0, overlap / max(6, len(ref_toks) * 0.3))
@@ -142,5 +150,4 @@ def grade_hard(agent_text: str, ground_truth: Dict[str, Any]) -> float:
     if "rate" in text and "limit" in text:
         base += 0.06
 
-    # Clamp to open interval (0.001, 0.999) — strictly between 0 and 1
-    return max(0.001, min(0.999, round(base, 4)))
+    return _safe_score(base)
