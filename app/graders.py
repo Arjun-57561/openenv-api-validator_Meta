@@ -1,171 +1,148 @@
-from __future__ import annotations
-
-import json
+"""
+Grading functions for easy / medium / hard tasks.
+All public grade_* functions MUST return a float in the OPEN interval (0, 1).
+"""
+import os
 import re
-from typing import Any, Dict
-
 from openai import OpenAI
 
-MIN_SCORE = 0.001
-MAX_SCORE = 0.95
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def clamp_score(score: float, lo: float = 0.05, hi: float = 0.95) -> float:
+    """Clamp to (0,1)-safe defaults so 0.0 and 1.0 are never returned."""
+    return max(lo, min(hi, float(score)))
 
 
-def clamp_score(x: float) -> float:
-    """Keep all scores strictly inside the allowed reward interval."""
-    try:
-        value = float(x)
-    except Exception:
-        value = 0.5
-    return max(MIN_SCORE, min(MAX_SCORE, round(value, 4)))
+def safe_score(raw: float) -> float:
+    return clamp_score(raw)
 
 
-def safe_score(x: float) -> float:
-    return clamp_score(x)
-
-
-def client() -> OpenAI:
-    import os
-
-    base = (os.getenv("APIBASEURL", "") or os.getenv("API_BASE_URL", "")).strip()
-    key = (os.getenv("HFTOKEN", "") or os.getenv("HF_TOKEN", "")).strip()
-    return OpenAI(base_url=base, api_key=key or "dummy")
-
-
-def model_name() -> str:
-    import os
-
-    return (os.getenv("MODELNAME", "") or os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")).strip()
-
-
-def grade_easy(agent_text: str, groundtruth: Dict[str, Any]) -> float:
-    """Rule-based scoring for easy tasks with max theoretical score of 0.90."""
-    text = (agent_text or "").lower()
-    score = MIN_SCORE
-
-    expstatus = int(groundtruth.get("expected_status", 0) or groundtruth.get("expectedstatus", 0))
-    if expstatus and str(expstatus) in agent_text:
-        score += 0.18
-
-    if (
-        "application/json" in text
-        or "content-type" in text
-        or " json" in text
-        or text.startswith("json")
-    ):
-        score += 0.18
-
-    req = groundtruth.get("required_fields", groundtruth.get("requiredfields", []))
-    if req:
-        hits = sum(1 for f in req if f.lower() in text)
-        score += 0.22 * (hits / len(req))
-
-    must_note_ok = groundtruth.get("must_note_ok", groundtruth.get("mustnoteok", False))
-    if must_note_ok and (
-        "valid" in text or "acceptable" in text or "correct" in text or "ok" in text
-    ):
-        score += 0.18
-
-    false_error = bool(re.search(r"\b(500|404|400)\b", agent_text or "")) and expstatus == 200
-    if not false_error:
-        score += 0.14
-
-    return max(MIN_SCORE, min(MAX_SCORE, round(score, 4)))
-
-
-def grade_medium(agent_text: str, groundtruth: Dict[str, Any]) -> float:
-    """Hybrid keyword/structure score with max theoretical score of 0.87."""
-    text = (agent_text or "").lower()
-    score = 0.30
-
-    keywords = groundtruth.get("expected_keywords", groundtruth.get("expectedkeywords", []))
-    if keywords:
-        hits = sum(1 for k in keywords if k.lower() in text)
-        score += 0.40 * (hits / len(keywords))
-
-    must_mention_nested = groundtruth.get(
-        "must_mention_nested", groundtruth.get("mustmentionnested", False)
+def _client() -> OpenAI:
+    return OpenAI(
+        api_key=os.environ.get("HF_TOKEN", ""),
+        base_url=os.environ.get("API_BASE_URL", "https://api-inference.huggingface.co/v1"),
     )
-    if must_mention_nested and re.search(r"user\.address|nested|address\.zip|zip", text):
+
+
+def _model() -> str:
+    return os.environ.get("MODEL_NAME", "mistralai/Mistral-7B-Instruct-v0.3")
+
+
+# ── easy grader (rule-based, max 0.88) ───────────────────────────────────────
+
+EASY_KEYWORDS_PASS = [
+    "valid", "correct", "200", "success", "ok", "matches", "schema",
+]
+EASY_KEYWORDS_FAIL = [
+    "invalid", "error", "mismatch", "wrong", "missing", "null", "undefined",
+]
+
+
+def grade_easy(action_content: str, ground_truth: str) -> float:
+    """Rule-based scoring. Returns float in (0.05, 0.88)."""
+    text = action_content.lower()
+    truth = ground_truth.lower()
+
+    score = 0.10  # base – never starts at 0
+
+    truth_words = set(re.findall(r"\w+", truth))
+    action_words = set(re.findall(r"\w+", text))
+    overlap = len(truth_words & action_words)
+    if truth_words:
+        overlap_ratio = overlap / len(truth_words)
+        score += overlap_ratio * 0.50
+
+    is_pass_truth = any(k in truth for k in EASY_KEYWORDS_PASS)
+    is_fail_truth = any(k in truth for k in EASY_KEYWORDS_FAIL)
+
+    if is_pass_truth and any(k in text for k in EASY_KEYWORDS_PASS):
+        score += 0.20
+    elif is_fail_truth and any(k in text for k in EASY_KEYWORDS_FAIL):
+        score += 0.20
+    else:
+        score -= 0.05
+
+    return clamp_score(score, lo=0.05, hi=0.88)
+
+
+# ── medium grader (hybrid, max 0.87) ─────────────────────────────────────────
+
+MEDIUM_STRUCTURE_KEYS = ["status", "schema", "field", "type", "required", "response"]
+
+
+def grade_medium(action_content: str, ground_truth: str) -> float:
+    """Hybrid keyword + structure scoring. Returns float in (0.05, 0.87)."""
+    text = action_content.lower()
+    truth = ground_truth.lower()
+
+    score = 0.10
+
+    truth_words = set(re.findall(r"\w+", truth))
+    action_words = set(re.findall(r"\w+", text))
+    overlap = len(truth_words & action_words) / max(len(truth_words), 1)
+    score += overlap * 0.40
+
+    struct_hits = sum(1 for k in MEDIUM_STRUCTURE_KEYS if k in text)
+    score += (struct_hits / len(MEDIUM_STRUCTURE_KEYS)) * 0.30
+
+    word_count = len(action_words)
+    if word_count >= 30:
         score += 0.10
+    elif word_count >= 15:
+        score += 0.05
 
-    must_mention_null = groundtruth.get(
-        "must_mention_null", groundtruth.get("mustmentionnull", False)
-    )
-    if must_mention_null and ("null" in text or "missing" in text or "omit" in text):
-        score += 0.07
-
-    if len((agent_text or "").strip()) < 40:
-        score -= 0.15
-
-    return max(MIN_SCORE, min(MAX_SCORE, round(score, 4)))
+    return clamp_score(score, lo=0.05, hi=0.87)
 
 
-def grade_hard(agent_text: str, groundtruth: Dict[str, Any]) -> float:
-    """LLM-as-judge plus deterministic fallback, both hard-clamped to safe bounds."""
-    rubric = groundtruth.get("rubric", "")
-    reference = groundtruth.get("reference_verdict", groundtruth.get("referenceverdict", ""))
+# ── hard grader (LLM-as-judge with deterministic fallback, max 0.93) ─────────
 
-    payload = {
-        "rubric": rubric,
-        "reference_verdict": reference,
-        "agent_verdict": (agent_text or "")[:8000],
-    }
+HARD_JUDGE_PROMPT = """You are a strict JSON-output judge evaluating an AI agent's API validation response.
 
-    system = (
-        "You grade how well the agent's API validation verdict matches the rubric and reference. "
-        "Reply ONLY with compact JSON: "
-        "{\"score\": <float strictly between 0 and 1, never 0.0 or 1.0>, "
-        "\"reason\": <short str>}. "
-        "Use fine-grained scoring and never emit boundary values."
-    )
-    user = json.dumps(payload)
+TASK: Score how well the agent's response matches the expected answer.
 
+Expected answer:
+{ground_truth}
+
+Agent response:
+{action}
+
+Rules:
+- Output ONLY a JSON object: {{"score": <float>}}
+- score must be strictly between 0.05 and 0.93 (never 0 or 1)
+- 0.05-0.30: completely wrong / irrelevant
+- 0.31-0.60: partially correct
+- 0.61-0.93: substantially correct with good reasoning
+"""
+
+
+def _deterministic_fallback(action_content: str, ground_truth: str) -> float:
+    truth_words = set(re.findall(r"\w+", ground_truth.lower()))
+    action_words = set(re.findall(r"\w+", action_content.lower()))
+    overlap = len(truth_words & action_words) / max(len(truth_words), 1)
+    return clamp_score(0.10 + overlap * 0.60, lo=0.05, hi=0.93)
+
+
+def grade_hard(action_content: str, ground_truth: str) -> float:
+    """LLM-as-judge scoring. Returns float in (0.05, 0.93)."""
     try:
-        resp = client().chat.completions.create(
-            model=model_name(),
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.35,
-            max_tokens=256,
+        client = _client()
+        prompt = HARD_JUDGE_PROMPT.format(
+            ground_truth=ground_truth, action=action_content
         )
-        raw = (resp.choices[0].message.content or "").strip()
-        match = re.search(r"\{[\s\S]*\}", raw)
+        response = client.chat.completions.create(
+            model=_model(),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=64,
+        )
+        raw = response.choices[0].message.content.strip()
+        match = re.search(r'"score"\s*:\s*([0-9.]+)', raw)
         if match:
-            data = json.loads(match.group())
-            llm_score = float(data.get("score", 0.5))
-            return max(MIN_SCORE, min(MAX_SCORE, llm_score))
+            return clamp_score(float(match.group(1)), lo=0.05, hi=0.93)
+        match2 = re.search(r'\b([0-9]\.[0-9]+)\b', raw)
+        if match2:
+            return clamp_score(float(match2.group(1)), lo=0.05, hi=0.93)
     except Exception:
         pass
-
-    text = (agent_text or "").lower()
-    reftoks = set(re.findall(r"[a-z]{4,}", reference.lower()))
-    if not reftoks:
-        return clamp_score(0.45)
-
-    overlap = sum(1 for token in reftoks if token in text)
-    base = 0.25 + 0.55 * min(0.999, overlap / max(6, len(reftoks) * 0.3))
-
-    if "pii" in text or "gdpr" in text or "privacy" in text:
-        base += 0.08
-    if "rate" in text and "limit" in text:
-        base += 0.06
-    if "requestid" in text or "request_id" in text:
-        base += 0.04
-    if "retryafter" in text or "retry_after" in text:
-        base += 0.04
-
-    return clamp_score(base)
-
-
-def gradeeasy(agent_text: str, groundtruth: Dict[str, Any]) -> float:
-    return grade_easy(agent_text, groundtruth)
-
-
-def grademedium(agent_text: str, groundtruth: Dict[str, Any]) -> float:
-    return grade_medium(agent_text, groundtruth)
-
-
-def gradehard(agent_text: str, groundtruth: Dict[str, Any]) -> float:
-    return grade_hard(agent_text, groundtruth)
+    return _deterministic_fallback(action_content, ground_truth)

@@ -1,37 +1,40 @@
 name: api_response_validator
 version: "1.0.0"
 description: >
-  Text environment where an agent validates synthetic HTTP API responses against contracts,
-  schema risks, and documentation—scored with mixed rule-based and LLM judges.
-author: Asharjun
-
-tasks:
-  - name: easytask
-    difficulty: easy
-    description: >
-      Confirm status code, JSON shape, and presence of minimal profile fields (id, name)
-      for a successful user profile response.
-  - name: mediumtask
-    difficulty: medium
-    description: >
-      Critique nested JSON and null handling (e.g., zip null under address) and explain
-      client/schema risks using precise vocabulary.
-  - name: hardtask
-    difficulty: hard
-    description: >
-      Evaluate documentation vs sample error payload, privacy/logging implications of
-      identifiers, and consistency of undocumented fields such as retryafter.
+  OpenEnv environment that tasks an AI agent with validating HTTP API responses
+  against contracts, schema rules, and REST best practices.
 
 observation_space:
   type: text
-  description: >
-    A natural-language scenario describing HTTP status, headers, and JSON body (or doc
-    excerpt) the agent must assess.
+  description: "An HTTP API response scenario including endpoint, headers, and body."
 
 action_space:
   type: text
-  description: >
-    Free-text validation verdict: findings, risks, and whether the response meets the
-    implied contract.
+  description: "Agent validation verdict with reasoning (VALID / INVALID / PARTIAL VALID)."
 
-reward_range: [0.01, 0.99]
+reward_range: [0.001, 0.999]
+
+tasks:
+  - id: easytask
+    name: "Basic API Response Validation"
+    difficulty: easy
+    description: "Validate simple HTTP responses – check status codes and basic JSON structure."
+    reward_threshold: 0.55
+
+  - id: mediumtask
+    name: "Schema & Business Rule Validation"
+    difficulty: medium
+    description: "Identify schema violations, type errors, and business rule breaches."
+    reward_threshold: 0.50
+
+  - id: hardtask
+    name: "Complex API Contract Validation"
+    difficulty: hard
+    description: "Evaluate advanced API patterns including payments, batch, SSE, and webhooks."
+    reward_threshold: 0.45
+
+endpoints:
+  reset: "/reset"
+  state: "/state"
+  step:  "/step"
+  health: "/health"

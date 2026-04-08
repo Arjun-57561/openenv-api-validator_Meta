@@ -1,54 +1,56 @@
-from __future__ import annotations
-
 import os
-
-from fastapi import FastAPI, HTTPException, Request
-
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
+from app.models import Action, State, StepResult, ResetRequest
 from app.environment import APIResponseValidatorEnv
-from app.models import Action, ResetRequest, State, StepResult
 
-app = FastAPI(title="OpenEnv API Response Validator")
-_env = APIResponseValidatorEnv()
+env = APIResponseValidatorEnv()
 
 
-def _require_config() -> None:
-    """Access env vars early so misconfigured deployments fail fast on hard grading."""
-    _ = (os.getenv("APIBASEURL", "") or os.getenv("API_BASE_URL", "")).strip()
-    _ = (os.getenv("MODELNAME", "") or os.getenv("MODEL_NAME", "")).strip()
-    _ = (os.getenv("HFTOKEN", "") or os.getenv("HF_TOKEN", "")).strip()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    required = ["API_BASE_URL", "MODEL_NAME", "HF_TOKEN"]
+    missing = [k for k in required if not os.environ.get(k)]
+    if missing:
+        print(f"[WARNING] Missing env vars: {missing}. Hard grader will use fallback.")
+    env.reset("easy")
+    yield
 
 
-@app.on_event("startup")
-def _startup() -> None:
-    _require_config()
-    _env.reset("easy")
+app = FastAPI(
+    title="API Response Validator",
+    description="OpenEnv-compatible environment for validating HTTP API responses.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
 @app.get("/health")
-def health() -> dict:
-    return {"status": "ok"}
+def health():
+    return {"status": "ok", "service": "api-response-validator"}
 
 
 @app.post("/reset", response_model=State)
-async def reset(request: Request) -> State:
+def reset(request: ResetRequest):
     try:
-        raw = await request.json()
-    except Exception:
-        raw = {}
-    if not isinstance(raw, dict):
-        raw = {}
-    body = ResetRequest.model_validate(raw)
-    return _env.reset(difficulty=body.difficulty)
-
-
-@app.post("/step", response_model=StepResult)
-def step(action: Action) -> StepResult:
-    try:
-        return _env.step(action)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        state = env.reset(difficulty=request.difficulty, seed=request.seed)
+        return state
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/state", response_model=State)
-def state() -> State:
-    return _env.state()
+def get_state():
+    try:
+        return env.get_state()
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/step", response_model=StepResult)
+def step(action: Action):
+    try:
+        result = env.step(action)
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
