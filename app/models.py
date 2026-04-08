@@ -1,37 +1,38 @@
+from __future__ import annotations
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, Any, Dict
 
 
 def clamp_reward(v: float) -> float:
-    """Strictly clamp reward to open interval (0, 1) — never 0.0 or 1.0."""
-    return max(0.001, min(0.999, float(v)))
+    """Strictly clamp to open interval (0, 1) — never exactly 0.0 or 1.0."""
+    return round(max(0.01, min(0.99, float(v))), 6)
 
 
 class Action(BaseModel):
-    content: str = Field(..., description="Agent evaluation / verdict text")
+    content: str = Field(..., description="Agent validation verdict text")
 
 
 class State(BaseModel):
-    difficulty: str = Field(..., description="easy | medium | hard")
+    difficulty: str = Field("easy")
     step_count: int = Field(0)
-    current_input: str = Field(..., description="API response scenario shown to agent")
-    ground_truth: Optional[str] = Field(None, description="Expected validation answer")
+    current_input: str = Field("")
+    ground_truth: Optional[str] = Field(None)
     done: bool = Field(False)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class StepResult(BaseModel):
     state: State
-    reward: float = Field(..., ge=0.001, le=0.999)
+    reward: float = Field(...)
     done: bool
     info: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("reward")
     @classmethod
-    def reward_in_range(cls, v: float) -> float:
+    def reward_must_be_open(cls, v: float) -> float:
         return clamp_reward(v)
 
 
 class ResetRequest(BaseModel):
-    difficulty: str = Field("easy", description="easy | medium | hard")
-    seed: Optional[int] = None
+    difficulty: str = Field("easy")
+    seed: Optional[int] = Field(None)

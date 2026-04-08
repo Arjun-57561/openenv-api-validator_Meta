@@ -1,27 +1,18 @@
-import os
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+"""FastAPI application — OpenEnv API Response Validator."""
+from __future__ import annotations
+from typing import Optional
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from app.models import Action, State, StepResult, ResetRequest
 from app.environment import APIResponseValidatorEnv
 
-env = APIResponseValidatorEnv()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    missing = [k for k in ["HF_TOKEN", "API_BASE_URL", "MODEL_NAME"] if not os.environ.get(k)]
-    if missing:
-        print(f"[WARNING] Missing env vars: {missing}. Hard grader will use deterministic fallback.")
-    env.reset("easy")
-    yield
-
-
 app = FastAPI(
     title="API Response Validator",
-    description="OpenEnv-compatible RL environment for HTTP API response validation.",
+    description="OpenEnv RL environment for HTTP API response validation.",
     version="1.0.0",
-    lifespan=lifespan,
 )
+
+env = APIResponseValidatorEnv()
 
 
 @app.get("/health")
@@ -30,24 +21,36 @@ def health():
 
 
 @app.post("/reset", response_model=State)
-def reset(request: ResetRequest):
+async def reset(request: Request):
+    """
+    Reset environment.
+    Accepts: no body, empty body, or JSON body with optional 'difficulty' and 'seed'.
+    Defaults: difficulty=easy, seed=None
+    """
+    difficulty = "easy"
+    seed: Optional[int] = None
     try:
-        return env.reset(difficulty=request.difficulty, seed=request.seed)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        body = await request.body()
+        if body:
+            data = await request.json()
+            if isinstance(data, dict):
+                difficulty = data.get("difficulty", "easy") or "easy"
+                seed = data.get("seed", None)
+    except Exception:
+        pass
+    return env.reset(difficulty=difficulty, seed=seed)
 
 
 @app.get("/state", response_model=State)
 def get_state():
-    try:
-        return env.get_state()
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    return env.get_state()
 
 
 @app.post("/step", response_model=StepResult)
 def step(action: Action):
-    try:
-        return env.step(action)
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    return env.step(action)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(status_code=500, content={"detail": str(exc)})

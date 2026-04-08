@@ -2,27 +2,27 @@ name: api_response_validator
 version: "1.0.0"
 description: >
   OpenEnv environment where an AI agent validates HTTP API responses
-  against contracts, schema rules, and REST best practices.
+  against REST contracts, schema rules, and business logic.
 
 observation_space:
   type: text
-  description: "HTTP API response scenario including endpoint, headers, and body."
+  description: "HTTP API response scenario including endpoint, status code, and response body."
 
 action_space:
   type: text
-  description: "Validation verdict with reasoning (VALID / INVALID / PARTIAL VALID)."
+  description: "Agent validation verdict with reasoning (VALID / INVALID / PARTIAL VALID)."
 
-reward_range: [0.001, 0.999]
+reward_range: [0.01, 0.99]
 
 tasks:
   - id: easytask
     name: "Basic API Response Validation"
     difficulty: easy
-    description: "Validate simple HTTP responses – status codes and JSON structure."
+    description: "Validate simple HTTP responses — status codes and JSON structure."
     reward_threshold: 0.55
 
   - id: mediumtask
-    name: "Schema & Business Rule Validation"
+    name: "Schema and Business Rule Validation"
     difficulty: medium
     description: "Identify schema violations, type errors, and business rule breaches."
     reward_threshold: 0.50
@@ -30,7 +30,7 @@ tasks:
   - id: hardtask
     name: "Complex API Contract Validation"
     difficulty: hard
-    description: "Evaluate payments, batch, SSE streams, and webhook patterns."
+    description: "Evaluate payments, batch multi-status, SSE streams, and webhook patterns."
     reward_threshold: 0.45
 
 endpoints:
