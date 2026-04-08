@@ -4,30 +4,34 @@ description: >
   Text environment where an agent validates synthetic HTTP API responses against contracts,
   schema risks, and documentation—scored with mixed rule-based and LLM judges.
 author: Asharjun
+
 tasks:
-  - name: easy_task
+  - name: easytask
     difficulty: easy
     description: >
       Confirm status code, JSON shape, and presence of minimal profile fields (id, name)
       for a successful user profile response.
-  - name: medium_task
+  - name: mediumtask
     difficulty: medium
     description: >
       Critique nested JSON and null handling (e.g., zip null under address) and explain
       client/schema risks using precise vocabulary.
-  - name: hard_task
+  - name: hardtask
     difficulty: hard
     description: >
       Evaluate documentation vs sample error payload, privacy/logging implications of
-      identifiers, and consistency of undocumented fields such as retry_after.
+      identifiers, and consistency of undocumented fields such as retryafter.
+
 observation_space:
   type: text
   description: >
     A natural-language scenario describing HTTP status, headers, and JSON body (or doc
     excerpt) the agent must assess.
+
 action_space:
   type: text
   description: >
     Free-text validation verdict: findings, risks, and whether the response meets the
     implied contract.
-reward_range: [0.0, 1.0]
+
+reward_range: [0.01, 0.99]
