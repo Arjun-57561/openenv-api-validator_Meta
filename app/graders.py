@@ -1,128 +1,51 @@
 """
-Grading functions for easy / medium / hard tasks.
-All grade_* functions return float strictly in open interval (0, 1).
-Uses Groq API (llama-3.1-8b-instant) with HF_TOKEN fallback.
+Grading functions — pure rule-based, no LLM calls.
+All return float strictly in open interval (0.05, 0.95).
 """
-import os
+from __future__ import annotations
 import re
-from openai import OpenAI
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-def clamp_score(score: float, lo: float = 0.05, hi: float = 0.95) -> float:
-    return max(lo, min(hi, float(score)))
+def _clamp(v: float, lo: float = 0.05, hi: float = 0.95) -> float:
+    return round(max(lo, min(hi, float(v))), 4)
 
 
-def _client() -> OpenAI:
-    groq_key = os.environ.get("GROQ_API_KEY", "")
-    hf_token = os.environ.get("HF_TOKEN", "")
-    api_key  = groq_key if groq_key else hf_token
-    base_url = os.environ.get("API_BASE_URL", "https://api.groq.com/openai/v1")
-    return OpenAI(api_key=api_key, base_url=base_url)
+def _words(text: str) -> set:
+    return set(re.findall(r"\w+", text.lower()))
 
 
-def _model() -> str:
-    return os.environ.get("MODEL_NAME", "llama-3.1-8b-instant")
+EASY_PASS = ["valid", "correct", "200", "201", "ok", "matches", "schema", "success"]
+EASY_FAIL = ["invalid", "error", "mismatch", "wrong", "missing", "null", "404", "500"]
+MEDIUM_KW = ["status", "schema", "field", "type", "required", "null", "violation", "partial", "invalid"]
+HARD_KW   = ["payment", "3ds", "webhook", "batch", "stream", "207", "requires_action", "redirect", "cents", "signature"]
 
 
-# ── easy grader (rule-based, max 0.88) ───────────────────────────────────────
-
-EASY_PASS_KW = ["valid", "correct", "200", "success", "ok", "matches", "schema"]
-EASY_FAIL_KW = ["invalid", "error", "mismatch", "wrong", "missing", "null", "undefined"]
-
-
-def grade_easy(action_content: str, ground_truth: str) -> float:
-    text  = action_content.lower()
-    truth = ground_truth.lower()
-
-    score = 0.10  # base — never starts at 0
-
-    truth_words  = set(re.findall(r"\w+", truth))
-    action_words = set(re.findall(r"\w+", text))
-    if truth_words:
-        score += (len(truth_words & action_words) / len(truth_words)) * 0.50
-
-    is_pass = any(k in truth for k in EASY_PASS_KW)
-    is_fail = any(k in truth for k in EASY_FAIL_KW)
-
-    if is_pass and any(k in text for k in EASY_PASS_KW):
+def grade_easy(action: str, ground_truth: str) -> float:
+    aw, tw = _words(action), _words(ground_truth)
+    score = 0.12 + (len(aw & tw) / max(len(tw), 1)) * 0.45
+    truth_is_pass = any(k in ground_truth.lower() for k in EASY_PASS)
+    truth_is_fail = any(k in ground_truth.lower() for k in EASY_FAIL)
+    if truth_is_pass and any(k in action.lower() for k in EASY_PASS):
         score += 0.20
-    elif is_fail and any(k in text for k in EASY_FAIL_KW):
+    elif truth_is_fail and any(k in action.lower() for k in EASY_FAIL):
         score += 0.20
-    else:
-        score -= 0.05
-
-    return clamp_score(score, lo=0.05, hi=0.88)
+    return _clamp(score)
 
 
-# ── medium grader (hybrid, max 0.87) ─────────────────────────────────────────
-
-MEDIUM_STRUCT_KW = ["status", "schema", "field", "type", "required", "response"]
-
-
-def grade_medium(action_content: str, ground_truth: str) -> float:
-    text  = action_content.lower()
-    truth = ground_truth.lower()
-
-    score = 0.10
-
-    truth_words  = set(re.findall(r"\w+", truth))
-    action_words = set(re.findall(r"\w+", text))
-    score += (len(truth_words & action_words) / max(len(truth_words), 1)) * 0.40
-    score += (sum(1 for k in MEDIUM_STRUCT_KW if k in text) / len(MEDIUM_STRUCT_KW)) * 0.30
-
-    wc = len(action_words)
-    if wc >= 30:
-        score += 0.10
-    elif wc >= 15:
-        score += 0.05
-
-    return clamp_score(score, lo=0.05, hi=0.87)
+def grade_medium(action: str, ground_truth: str) -> float:
+    aw, tw = _words(action), _words(ground_truth)
+    score = 0.12
+    score += (len(aw & tw) / max(len(tw), 1)) * 0.38
+    score += (sum(1 for k in MEDIUM_KW if k in action.lower()) / len(MEDIUM_KW)) * 0.28
+    if len(aw) >= 15:
+        score += 0.08
+    return _clamp(score)
 
 
-# ── hard grader (LLM-as-judge, max 0.93) ─────────────────────────────────────
-
-HARD_PROMPT = """You are a strict JSON-output judge evaluating an AI agent's API validation response.
-
-Expected answer:
-{ground_truth}
-
-Agent response:
-{action}
-
-Output ONLY valid JSON: {{"score": <float>}}
-Rules:
-- score must be strictly between 0.05 and 0.93 (never 0 or 1)
-- 0.05-0.30: completely wrong
-- 0.31-0.60: partially correct
-- 0.61-0.93: substantially correct with good reasoning
-"""
-
-
-def _fallback(action_content: str, ground_truth: str) -> float:
-    t = set(re.findall(r"\w+", ground_truth.lower()))
-    a = set(re.findall(r"\w+", action_content.lower()))
-    return clamp_score(0.10 + (len(t & a) / max(len(t), 1)) * 0.60, lo=0.05, hi=0.93)
-
-
-def grade_hard(action_content: str, ground_truth: str) -> float:
-    try:
-        resp = _client().chat.completions.create(
-            model=_model(),
-            messages=[{"role": "user", "content": HARD_PROMPT.format(
-                ground_truth=ground_truth, action=action_content
-            )}],
-            temperature=0.0,
-            max_tokens=64,
-        )
-        raw = resp.choices[0].message.content.strip()
-        m = re.search(r'"score"\s*:\s*([0-9.]+)', raw)
-        if m:
-            return clamp_score(float(m.group(1)), lo=0.05, hi=0.93)
-        m2 = re.search(r'\b([0-9]\.[0-9]+)\b', raw)
-        if m2:
-            return clamp_score(float(m2.group(1)), lo=0.05, hi=0.93)
-    except Exception:
-        pass
-    return _fallback(action_content, ground_truth)
+def grade_hard(action: str, ground_truth: str) -> float:
+    aw, tw = _words(action), _words(ground_truth)
+    score = 0.12 + (len(aw & tw) / max(len(tw), 1)) * 0.45
+    score += (sum(1 for k in HARD_KW if k in action.lower()) / len(HARD_KW)) * 0.25
+    if len(aw) >= 10:
+        score += 0.06
+    return _clamp(score)
