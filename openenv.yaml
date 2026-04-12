@@ -15,19 +15,19 @@ action_space:
 reward_range: [0.01, 0.99]
 
 tasks:
-  - id: easytask
+  - id: easy_api_validation_task
     name: "Basic API Response Validation"
     difficulty: easy
     description: "Validate simple HTTP responses — status codes and JSON structure."
     reward_threshold: 0.55
 
-  - id: mediumtask
+  - id: medium_api_validation_task
     name: "Schema and Business Rule Validation"
     difficulty: medium
     description: "Identify schema violations, type errors, and business rule breaches."
     reward_threshold: 0.50
 
-  - id: hardtask
+  - id: hard_api_validation_task
     name: "Complex API Contract Validation"
     difficulty: hard
     description: "Evaluate payments, batch multi-status, SSE streams, and webhook patterns."

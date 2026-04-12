@@ -1,8 +1,9 @@
 """FastAPI application — OpenEnv API Response Validator."""
 from __future__ import annotations
+import os
 from typing import Optional
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from app.models import Action, State, StepResult, ResetRequest
 from app.environment import APIResponseValidatorEnv
 
@@ -14,19 +15,73 @@ app = FastAPI(
 
 env = APIResponseValidatorEnv()
 
+OPENENV_YAML = """
+name: api_response_validator
+version: "1.0.0"
+description: >
+  OpenEnv environment where an AI agent validates HTTP API responses
+  against REST contracts, schema rules, and business logic.
+
+observation_space:
+  type: text
+  description: "HTTP API response scenario including endpoint, status code, and response body."
+
+action_space:
+  type: text
+  description: "Agent validation verdict with reasoning (VALID / INVALID / PARTIAL VALID)."
+
+reward_range: [0.01, 0.99]
+
+tasks:
+  - id: easy_api_validation_task
+    name: "Basic API Response Validation"
+    difficulty: easy
+    description: "Validate simple HTTP responses — status codes and JSON structure."
+    reward_threshold: 0.55
+
+  - id: medium_api_validation_task
+    name: "Schema and Business Rule Validation"
+    difficulty: medium
+    description: "Identify schema violations, type errors, and business rule breaches."
+    reward_threshold: 0.50
+
+  - id: hard_api_validation_task
+    name: "Complex API Contract Validation"
+    difficulty: hard
+    description: "Evaluate payments, batch multi-status, SSE streams, and webhook patterns."
+    reward_threshold: 0.45
+
+endpoints:
+  reset:  "/reset"
+  state:  "/state"
+  step:   "/step"
+  health: "/health"
+""".strip()
+
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "api-response-validator"}
 
 
+@app.get("/openenv.yaml", response_class=PlainTextResponse)
+def openenv_yaml():
+    """Serve the OpenEnv spec file."""
+    return OPENENV_YAML
+
+
+@app.get("/tasks")
+def list_tasks():
+    """List all available tasks."""
+    return [
+        {"id": "easy_api_validation_task",   "difficulty": "easy",   "reward_range": [0.01, 0.99]},
+        {"id": "medium_api_validation_task", "difficulty": "medium", "reward_range": [0.01, 0.99]},
+        {"id": "hard_api_validation_task",   "difficulty": "hard",   "reward_range": [0.01, 0.99]},
+    ]
+
+
 @app.post("/reset", response_model=State)
 async def reset(request: Request):
-    """
-    Reset environment.
-    Accepts: no body, empty body, or JSON body with optional 'difficulty' and 'seed'.
-    Defaults: difficulty=easy, seed=None
-    """
     difficulty = "easy"
     seed: Optional[int] = None
     try:
